@@ -1,0 +1,21 @@
+{
+  "name": "Bitget Trading Agent",
+  "short_name": "Bitget Agent",
+  "description": "Natural Language-Driven Crypto Trading Agent",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c1222",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
