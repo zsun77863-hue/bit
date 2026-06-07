@@ -1,133 +1,80 @@
-import crypto from 'crypto'
+/**
+ * Bitget API Signature Utility
+ * 
+ * Implements correct Bitget V2 API signing:
+ * - Signature = Base64(HMAC-SHA256(timestamp + method + requestPath + body, secretKey))
+ * - Headers: ACCESS-KEY, ACCESS-SIGN, ACCESS-TIMESTAMP, ACCESS-PASSPHRASE
+ * 
+ * Reference: https://www.bitget.com/api-doc/common/intro
+ * Reference: https://github.com/Bitget-AI/agent_hub (bitget-client logic)
+ */
+
+export interface BitgetAuthHeaders {
+  'ACCESS-KEY': string
+  'ACCESS-SIGN': string
+  'ACCESS-TIMESTAMP': string
+  'ACCESS-PASSPHRASE': string
+  'Content-Type': string
+  'locale': string
+}
 
 /**
- * Bitget API Signature Generator
- * Reference: https://www.bitget.com/api-doc/common/intro
+ * Generate HMAC-SHA256 signature for Bitget API
  * 
- * Signature logic:
- * 1. Construct pre-hash string: timestamp + method.toUpperCase() + requestPath + body
- * 2. Sign with HMAC SHA256 using secretKey
- * 3. Base64 encode the result
+ * @param timestamp - Unix timestamp in milliseconds (string)
+ * @param method - HTTP method (GET, POST)
+ * @param requestPath - API path (e.g., /api/v2/mix/account/accounts)
+ * @param body - Request body (empty string for GET)
+ * @param secretKey - API Secret Key
+ * @returns Base64 encoded signature
  */
-export function signBitgetRequest(
+export async function signRequest(
   timestamp: string,
   method: string,
   requestPath: string,
   body: string,
   secretKey: string
-): string {
-  const preHash = timestamp + method.toUpperCase() + requestPath + body
-  const signature = crypto
-    .createHmac('sha256', secretKey)
-    .update(preHash)
-    .digest('base64')
-  return signature
+): Promise<string> {
+  const message = timestamp + method.toUpperCase() + requestPath + body
+  
+  // Use Web Crypto API (available in Node.js and browsers)
+  const encoder = new TextEncoder()
+  const keyData = encoder.encode(secretKey)
+  const msgData = encoder.encode(message)
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgData)
+  const sigArray = Array.from(new Uint8Array(signature))
+  return btoa(String.fromCharCode(...sigArray))
 }
 
 /**
- * Build authenticated headers for Bitget API requests
+ * Generate full authentication headers for Bitget API
  */
-export function buildBitgetHeaders(
-  apiKey: string,
-  secretKey: string,
-  passphrase: string,
+export async function generateAuthHeaders(
   method: string,
   requestPath: string,
-  body: string = ''
-): Record<string, string> {
+  body: string,
+  apiKey: string,
+  secretKey: string,
+  passphrase: string
+): Promise<BitgetAuthHeaders> {
   const timestamp = Date.now().toString()
-  const sign = signBitgetRequest(timestamp, method, requestPath, body, secretKey)
-
+  const sign = await signRequest(timestamp, method, requestPath, body, secretKey)
+  
   return {
     'ACCESS-KEY': apiKey,
     'ACCESS-SIGN': sign,
     'ACCESS-TIMESTAMP': timestamp,
     'ACCESS-PASSPHRASE': passphrase,
     'Content-Type': 'application/json',
-    'X-CHANNEL-API-CODE': 'bitget_trading_agent',
-  }
-}
-
-/**
- * Server-side Bitget API call with proper authentication
- */
-export async function bitgetAuthenticatedRequest(
-  method: string,
-  requestPath: string,
-  apiKey: string,
-  secretKey: string,
-  passphrase: string,
-  body?: Record<string, unknown>
-): Promise<{ data: unknown; ok: boolean; error?: string }> {
-  const baseUrl = 'https://api.bitget.com'
-  const bodyStr = body ? JSON.stringify(body) : ''
-  const url = `${baseUrl}${requestPath}`
-
-  const headers = buildBitgetHeaders(
-    apiKey,
-    secretKey,
-    passphrase,
-    method,
-    requestPath,
-    bodyStr
-  )
-
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: method !== 'GET' ? bodyStr : undefined,
-    })
-
-    const data = await response.json()
-
-    if (data.code !== '00000') {
-      return { data: null, ok: false, error: data.msg || 'API request failed' }
-    }
-
-    return { data: data.data, ok: true }
-  } catch (error) {
-    return {
-      data: null,
-      ok: false,
-      error: error instanceof Error ? error.message : 'Network error',
-    }
-  }
-}
-
-/**
- * Public Bitget API call (no authentication needed)
- */
-export async function bitgetPublicRequest(
-  requestPath: string,
-  params?: Record<string, string>
-): Promise<{ data: unknown; ok: boolean; error?: string }> {
-  const baseUrl = 'https://api.bitget.com'
-  let url = `${baseUrl}${requestPath}`
-
-  if (params) {
-    const searchParams = new URLSearchParams(params)
-    url += `?${searchParams.toString()}`
-  }
-
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    })
-
-    const data = await response.json()
-
-    if (data.code !== '00000') {
-      return { data: null, ok: false, error: data.msg || 'API request failed' }
-    }
-
-    return { data: data.data, ok: true }
-  } catch (error) {
-    return {
-      data: null,
-      ok: false,
-      error: error instanceof Error ? error.message : 'Network error',
-    }
+    'locale': 'en-US',
   }
 }

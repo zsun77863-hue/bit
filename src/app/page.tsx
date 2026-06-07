@@ -396,49 +396,43 @@ export default function TradingAgentApp() {
     }
     setAccountLoading(true)
     try {
+      const qs = new URLSearchParams({
+        apiKey: store.bitgetConfig.apiKey,
+        secretKey: store.bitgetConfig.secretKey,
+        passphrase: store.bitgetConfig.passphrase,
+      }).toString()
+
       const [balRes, posRes] = await Promise.all([
-        fetch('/api/bitget/balance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            apiKey: store.bitgetConfig.apiKey,
-            secretKey: store.bitgetConfig.secretKey,
-            passphrase: store.bitgetConfig.passphrase,
-          }),
-        }),
-        fetch('/api/bitget/positions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            apiKey: store.bitgetConfig.apiKey,
-            secretKey: store.bitgetConfig.secretKey,
-            passphrase: store.bitgetConfig.passphrase,
-          }),
-        }),
+        fetch(`/api/bitget/balance?${qs}`),
+        fetch(`/api/bitget/positions?${qs}`),
       ])
 
       const balData = await balRes.json()
       const posData = await posRes.json()
 
       // Check for IP whitelist error
-      const isIpError = (balData.error && String(balData.error).includes('Invalid IP')) ||
-                         (posData.error && String(posData.error).includes('Invalid IP'))
+      const isIpError = balData.isIpError || posData.isIpError ||
+                         (balData.error && String(balData.error).toLowerCase().includes('ip')) ||
+                         (posData.error && String(posData.error).toLowerCase().includes('ip'))
 
       if (isIpError) {
-        store.setAccountError('IP whitelist error: Add 0.0.0.0/0 to your Bitget API Key IP whitelist, or add the server IP. Go to Bitget > API Management > Edit > IP Whitelist.')
+        store.setAccountError('IP whitelist error: Add 0.0.0.0/0 to your Bitget API Key IP whitelist. Go to Bitget > API Management > Edit > IP Whitelist.')
+      } else if (balData.error || posData.error) {
+        const errMsg = balData.error || posData.error || 'Unknown error'
+        store.setAccountError(`API Error: ${errMsg}`)
       } else {
         store.setAccountError('')
       }
 
-      if (balData.ok && Array.isArray(balData.data)) {
+      if (Array.isArray(balData.data)) {
         setAccountBalances(balData.data)
-        const usdtBalance = balData.data.find((b: AccountBalance) => b.coin === 'USDT')
+        const usdtBalance = balData.data.find((b: AccountBalance) => b.marginCoin === 'USDT')
         if (usdtBalance) {
-          store.setBalance(parseFloat(usdtBalance.available || usdtBalance.total || '0'))
+          store.setBalance(parseFloat(usdtBalance.available || usdtBalance.equity || '0'))
         }
       }
 
-      if (posData.ok && Array.isArray(posData.data)) {
+      if (Array.isArray(posData.data)) {
         setAccountPositions(posData.data)
       }
     } catch (err) {
@@ -446,11 +440,22 @@ export default function TradingAgentApp() {
       store.setAccountError(`Connection failed: ${msg}`)
     }
     setAccountLoading(false)
-  }, [store.bitgetConfig])
+  }, [store])
 
   useEffect(() => {
     fetchAccountData()
   }, [fetchAccountData])
+
+  // ============ SIMULATED ACCOUNT DATA ============
+  // When no API keys are configured, show simulated data
+  useEffect(() => {
+    if (!store.bitgetConfig.apiKey && accountBalances.length === 0) {
+      setAccountBalances([
+        { marginCoin: 'USDT', coin: 'USDT', available: '10000.00', frozen: '0.00', total: '10000.00', usdtValue: '10000.00', equity: '10000.00' },
+      ])
+      store.setBalance(10000)
+    }
+  }, [store.bitgetConfig.apiKey, accountBalances.length, store])
 
   // ============ AUTO SCROLL ============
   useEffect(() => {
@@ -1010,10 +1015,25 @@ export default function TradingAgentApp() {
           <div className="flex items-center gap-2">
             <IconWallet className="w-5 h-5 text-primary" />
             <h3 className="font-semibold">{tr.dashboard.assetOverview}</h3>
+            {store.bitgetConfig.apiKey && accountBalances.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400">LIVE</span>
+            )}
+            {!store.bitgetConfig.apiKey && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400">SIMULATED</span>
+            )}
           </div>
-          <button onClick={fetchAccountData} className="text-xs text-primary hover:underline flex items-center gap-1">
-            <IconRefresh className="w-3 h-3" />
-            Refresh
+          <button 
+            onClick={fetchAccountData} 
+            disabled={accountLoading}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors",
+              accountLoading 
+                ? "bg-muted text-muted-foreground cursor-wait" 
+                : "bg-primary/10 text-primary hover:bg-primary/20"
+            )}
+          >
+            <IconRefresh className={cn("w-3 h-3", accountLoading && "animate-spin")} />
+            {accountLoading ? 'Loading...' : 'Refresh Assets'}
           </button>
         </div>
 
@@ -1029,8 +1049,8 @@ export default function TradingAgentApp() {
         {/* No API Keys Warning */}
         {!store.bitgetConfig.apiKey && (
           <div className="mb-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-xs text-blue-400 space-y-1">
-            <p className="font-semibold">ℹ️ No API Keys Configured</p>
-            <p>Go to Settings to add your Bitget API credentials. Public market data still works without keys.</p>
+            <p className="font-semibold">ℹ️ Simulated Mode</p>
+            <p>Showing simulated account data. Go to Settings to add your Bitget API credentials for real balance &amp; positions.</p>
           </div>
         )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1038,14 +1058,14 @@ export default function TradingAgentApp() {
             <p className="text-xs text-muted-foreground">{tr.dashboard.balance}</p>
             <p className="font-bold text-lg font-mono">
               {accountBalances.length > 0
-                ? formatCurrency(accountBalances.reduce((sum, b) => sum + parseFloat(b.usdtValue || b.total || '0'), 0))
+                ? formatCurrency(accountBalances.reduce((sum, b) => sum + parseFloat(b.equity || b.usdtValue || b.total || '0'), 0))
                 : formatCurrency(store.balance)}
             </p>
             {accountBalances.length > 0 && (
               <div className="mt-1 space-y-0.5">
                 {accountBalances.slice(0, 3).map((b) => (
-                  <p key={b.coin} className="text-xs text-muted-foreground font-mono">
-                    {b.coin}: {parseFloat(b.available || '0').toFixed(4)}
+                  <p key={b.marginCoin || b.coin} className="text-xs text-muted-foreground font-mono">
+                    {b.marginCoin || b.coin}: {parseFloat(b.available || '0').toFixed(4)}
                   </p>
                 ))}
               </div>

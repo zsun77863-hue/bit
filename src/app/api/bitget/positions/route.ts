@@ -1,27 +1,63 @@
 import { NextResponse } from 'next/server'
-import crypto from 'crypto'
 
-const BITGET_BASE = 'https://api.bitget.com'
+/**
+ * GET /api/bitget/positions?apiKey=...&secretKey=...&passphrase=...
+ * 
+ * Fetches open positions from Bitget Private API.
+ * Requires: API Key, Secret Key, Passphrase
+ * 
+ * Bitget API: GET /api/v2/mix/position/all-position?productType=USDT-FUTURES
+ */
 
-function signRequest(timestamp: string, method: string, path: string, body: string, secretKey: string): string {
-  const preHash = timestamp + method.toUpperCase() + path + body
-  return crypto.createHmac('sha256', secretKey).update(preHash).digest('base64')
+async function signRequest(
+  timestamp: string,
+  method: string,
+  requestPath: string,
+  body: string,
+  secretKey: string
+): Promise<string> {
+  const message = timestamp + method.toUpperCase() + requestPath + body
+  const encoder = new TextEncoder()
+  const keyData = encoder.encode(secretKey)
+  const msgData = encoder.encode(message)
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgData)
+  const sigArray = Array.from(new Uint8Array(signature))
+  return btoa(String.fromCharCode(...sigArray))
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   try {
-    const { apiKey, secretKey, passphrase } = await request.json()
+    const { searchParams } = new URL(request.url)
+    const apiKey = searchParams.get('apiKey')
+    const secretKey = searchParams.get('secretKey')
+    const passphrase = searchParams.get('passphrase')
 
     if (!apiKey || !secretKey || !passphrase) {
-      return NextResponse.json({ error: 'API credentials required' }, { status: 400 })
+      return NextResponse.json(
+        { 
+          error: 'API Key, Secret Key, and Passphrase are required',
+          isIpError: false,
+        },
+        { status: 400 }
+      )
     }
 
-    const method = 'GET'
     const requestPath = '/api/v2/mix/position/all-position?productType=USDT-FUTURES'
+    const method = 'GET'
+    const body = ''
     const timestamp = Date.now().toString()
-    const sign = signRequest(timestamp, method, requestPath, '', secretKey)
+    const sign = await signRequest(timestamp, method, requestPath, body, secretKey)
 
-    const res = await fetch(`${BITGET_BASE}${requestPath}`, {
+    const res = await fetch('https://api.bitget.com' + requestPath, {
       method,
       headers: {
         'ACCESS-KEY': apiKey,
@@ -29,49 +65,38 @@ export async function POST(request: Request) {
         'ACCESS-TIMESTAMP': timestamp,
         'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json',
-        'X-CHANNEL-API-CODE': 'bitget_trading_agent',
+        'locale': 'en-US',
       },
     })
 
-    const data = await res.json()
+    const json = await res.json()
 
-    if (data.code === '00000') {
-      return NextResponse.json({ data: data.data, ok: true })
+    if (json.code === '00000' && Array.isArray(json.data)) {
+      return NextResponse.json({ data: json.data, timestamp: Date.now() })
     }
 
-    const errorMsg = data.msg || 'Failed to fetch positions'
-    const errorCode = data.code || ''
+    const errorMsg = json.msg || 'Unknown error'
+    const isIpError = errorMsg.toLowerCase().includes('ip') || 
+                      errorMsg.toLowerCase().includes('whitelist') ||
+                      errorMsg.toLowerCase().includes('access') ||
+                      json.code === '40001'
 
-    if (String(errorMsg).includes('Invalid IP') || errorCode === '40001') {
-      return NextResponse.json({
-        data: null,
-        ok: false,
-        error: `Invalid IP. Add "0.0.0.0/0" to your Bitget API Key IP whitelist.`,
-        errorType: 'IP_WHITELIST',
-      })
-    }
-
-    if (errorCode === '40002' || String(errorMsg).includes('Invalid')) {
-      return NextResponse.json({
-        data: null,
-        ok: false,
-        error: `Authentication failed: ${errorMsg}`,
-        errorType: 'AUTH',
-      })
-    }
-
-    return NextResponse.json({
-      data: null,
-      ok: false,
-      error: errorMsg,
-      errorType: 'API_ERROR',
-    })
+    return NextResponse.json(
+      { 
+        error: errorMsg, 
+        code: json.code,
+        isIpError,
+        hint: isIpError 
+          ? 'IP Whitelist Error: Go to Bitget > API Management > Edit > Add 0.0.0.0/0 to IP Whitelist'
+          : 'API request failed. Please check your credentials.',
+      },
+      { status: 401 }
+    )
   } catch (error) {
-    return NextResponse.json({
-      data: null,
-      ok: false,
-      error: error instanceof Error ? error.message : 'Network error',
-      errorType: 'NETWORK',
-    }, { status: 500 })
+    console.error('Positions proxy error:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch positions from Bitget', code: 'PROXY_ERROR' },
+      { status: 502 }
+    )
   }
 }

@@ -1,229 +1,243 @@
-import type { TickerData, PriceData, CoinSymbol } from '@/types'
-
-// ============ PUBLIC API (No Auth Required) ============
-
 /**
- * Fetch real-time ticker from Bitget public API
- * Endpoint: GET /api/v2/market/tickers
+ * Bitget API Client
+ * 
+ * Public API (no auth needed):
+ * - GET /api/v2/market/tickers - All tickers
+ * - GET /api/v2/market/candles - K-line data
+ * 
+ * Private API (auth required):
+ * - GET /api/v2/mix/account/accounts - Account balance
+ * - GET /api/v2/mix/position/all-position - Open positions
+ * - POST /api/v2/mix/order/place-order - Place order
+ * 
+ * Reference: https://www.bitget.com/api-doc
+ * Reference: https://github.com/Bitget-AI/agent_hub
  */
-export async function fetchTickerData(symbol: string): Promise<TickerData> {
-  try {
-    const response = await fetch(`/api/bitget/ticker?symbol=${symbol}`)
-    if (response.ok) {
-      const data = await response.json()
-      if (data && data.lastPrice) return data
-    }
-  } catch {
-    // fallback
-  }
-  return generateMockTicker(symbol)
+
+// ============ TYPES ============
+
+// Types are imported from @/types
+// TickerData, PriceData, AccountBalance, PositionData are defined in src/types/index.ts
+
+export interface CandleData {
+  ts: string
+  open: string
+  high: string
+  low: string
+  close: string
+  quoteVol: string
+  baseVol: string
+  usdtVol: string
 }
 
-/**
- * Fetch all tickers at once for the ticker bar
- */
-export async function fetchAllTickers(): Promise<Record<string, TickerData>> {
-  try {
-    const response = await fetch('/api/bitget/tickers')
-    if (response.ok) {
-      const data = await response.json()
-      if (data && typeof data === 'object') return data
-    }
-  } catch {
-    // fallback
-  }
-  // Generate mock for all coins
-  const result: Record<string, TickerData> = {}
-  const coins: CoinSymbol[] = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT']
-  for (const coin of coins) {
-    result[coin] = generateMockTicker(coin)
-  }
-  return result
-}
-
-/**
- * Fetch candlestick data from Bitget public API
- * Endpoint: GET /api/v2/market/candles
- */
-export async function fetchPriceHistory(
-  symbol: string,
-  granularity: string = '1h',
-  limit: number = 100
-): Promise<PriceData[]> {
-  try {
-    const response = await fetch(
-      `/api/bitget/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`
-    )
-    if (response.ok) {
-      const data = await response.json()
-      if (Array.isArray(data) && data.length > 0) return data
-    }
-  } catch {
-    // fallback
-  }
-  return generateMockPriceHistory(symbol, limit)
-}
-
-// ============ AUTHENTICATED API (Requires API Keys) ============
-
-export interface AccountBalance {
-  coin: string
-  available: string
-  frozen: string
-  total: string
-  usdtValue: string
-}
-
-export interface PositionData {
-  symbol: string
-  side: string
-  size: string
-  avgPrice: string
-  markPrice: string
-  unrealizedPL: string
-  leverage: string
-  margin: string
-}
-
-/**
- * Fetch account balance via server-side API proxy
- */
-export async function fetchAccountBalance(): Promise<{
-  ok: boolean
-  data: AccountBalance[]
-  error?: string
-}> {
-  try {
-    const response = await fetch('/api/bitget/balance')
-    if (response.ok) {
-      return await response.json()
-    }
-    return { ok: false, data: [], error: 'Failed to fetch balance' }
-  } catch (error) {
-    return {
-      ok: false,
-      data: [],
-      error: error instanceof Error ? error.message : 'Network error',
-    }
-  }
-}
-
-/**
- * Fetch positions via server-side API proxy
- */
-export async function fetchPositions(): Promise<{
-  ok: boolean
-  data: PositionData[]
-  error?: string
-}> {
-  try {
-    const response = await fetch('/api/bitget/positions')
-    if (response.ok) {
-      return await response.json()
-    }
-    return { ok: false, data: [], error: 'Failed to fetch positions' }
-  } catch (error) {
-    return {
-      ok: false,
-      data: [],
-      error: error instanceof Error ? error.message : 'Network error',
-    }
-  }
-}
-
-/**
- * Place order via server-side API proxy
- */
-export async function placeOrder(params: {
-  symbol: string
-  side: 'buy' | 'sell'
-  amount: number
-  price: number
-  orderType: 'market' | 'limit'
-}): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  try {
-    const response = await fetch('/api/bitget/order', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    })
-    if (response.ok) {
-      return await response.json()
-    }
-    return { ok: false, error: 'Failed to place order' }
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : 'Network error',
-    }
-  }
-}
-
-// ============ MOCK DATA GENERATORS ============
-
-function generateMockTicker(symbol: string): TickerData {
-  const basePrices: Record<string, number> = {
-    BTCUSDT: 67500, ETHUSDT: 3450, SOLUSDT: 178,
-    BNBUSDT: 610, XRPUSDT: 0.62, DOGEUSDT: 0.165,
-  }
-  const base = basePrices[symbol] || 100
-  const change = (Math.random() - 0.5) * 0.06
-  const lastPrice = base * (1 + change)
-  return {
-    symbol,
-    lastPrice: parseFloat(lastPrice.toFixed(lastPrice > 1 ? 2 : 6)),
-    change24h: parseFloat((change * 100).toFixed(2)),
-    high24h: parseFloat((lastPrice * 1.03).toFixed(2)),
-    low24h: parseFloat((lastPrice * 0.97).toFixed(2)),
-    volume24h: parseFloat((Math.random() * 1000000000).toFixed(0)),
-  }
-}
-
-function generateMockPriceHistory(symbol: string, limit: number): PriceData[] {
-  const basePrices: Record<string, number> = {
-    BTCUSDT: 67500, ETHUSDT: 3450, SOLUSDT: 178,
-    BNBUSDT: 610, XRPUSDT: 0.62, DOGEUSDT: 0.165,
-  }
-  const base = basePrices[symbol] || 100
-  const now = Date.now()
-  const data: PriceData[] = []
-  let price = base
-
-  for (let i = limit; i > 0; i--) {
-    const change = (Math.random() - 0.48) * base * 0.02
-    price += change
-    const high = price * (1 + Math.random() * 0.01)
-    const low = price * (1 - Math.random() * 0.01)
-    data.push({
-      timestamp: now - i * 3600000,
-      open: parseFloat((price - change).toFixed(2)),
-      high: parseFloat(high.toFixed(2)),
-      low: parseFloat(low.toFixed(2)),
-      close: parseFloat(price.toFixed(2)),
-      volume: parseFloat((Math.random() * 10000000).toFixed(0)),
-    })
-  }
-  return data
-}
-
-// ============ COIN LIST ============
-
-export const COIN_LIST: { symbol: CoinSymbol; name: string; icon: string }[] = [
-  { symbol: 'BTCUSDT', name: 'Bitcoin', icon: '₿' },
-  { symbol: 'ETHUSDT', name: 'Ethereum', icon: 'Ξ' },
-  { symbol: 'SOLUSDT', name: 'Solana', icon: '◎' },
-  { symbol: 'BNBUSDT', name: 'BNB', icon: '◆' },
-  { symbol: 'XRPUSDT', name: 'XRP', icon: '✕' },
-  { symbol: 'DOGEUSDT', name: 'Dogecoin', icon: 'Ð' },
+export const COIN_LIST = [
+  { symbol: 'BTCUSDT' as const, name: 'BTC', icon: '₿' },
+  { symbol: 'ETHUSDT' as const, name: 'ETH', icon: 'Ξ' },
+  { symbol: 'SOLUSDT' as const, name: 'SOL', icon: '◎' },
+  { symbol: 'BNBUSDT' as const, name: 'BNB', icon: '◆' },
+  { symbol: 'XRPUSDT' as const, name: 'XRP', icon: '✕' },
+  { symbol: 'DOGEUSDT' as const, name: 'DOGE', icon: 'Ð' },
 ]
 
 export const CHART_INTERVALS = [
-  { value: '1m', label: '1m' },
-  { value: '5m', label: '5m' },
-  { value: '15m', label: '15m' },
+  { value: '1min', label: '1m' },
+  { value: '5min', label: '5m' },
+  { value: '15min', label: '15m' },
+  { value: '30min', label: '30m' },
   { value: '1h', label: '1H' },
   { value: '4h', label: '4H' },
   { value: '1day', label: '1D' },
-] as const
+  { value: '1week', label: '1W' },
+]
 
-export type ChartInterval = (typeof CHART_INTERVALS)[number]['value']
+// ============ PUBLIC API FUNCTIONS ============
+
+/**
+ * Fetch all USDT-FUTURES tickers from our proxy
+ * Maps Bitget response to our TickerData format
+ */
+export async function fetchAllTickers(): Promise<Record<string, import('@/types').TickerData>> {
+  try {
+    const res = await fetch('/api/bitget/tickers')
+    const json = await res.json()
+
+    if (!json.data || !Array.isArray(json.data)) {
+      console.warn('fetchAllTickers: no data array in response')
+      return {}
+    }
+
+    const result: Record<string, import('@/types').TickerData> = {}
+    for (const item of json.data) {
+      // Bitget V2 ticker fields
+      const symbol = item.symbol || item.instId || ''
+      if (!symbol) continue
+
+      result[symbol] = {
+        symbol,
+        lastPrice: parseFloat(item.lastPr || item.last || '0'),
+        high24h: parseFloat(item.high24h || '0'),
+        low24h: parseFloat(item.low24h || '0'),
+        change24h: parseFloat(item.changeUtc24h || item.change24h || '0'),
+        volume24h: parseFloat(item.quoteVolume24h || item.usdtVolume24h || item.baseVolume24h || '0'),
+      }
+    }
+    return result
+  } catch (error) {
+    console.error('fetchAllTickers error:', error)
+    return {}
+  }
+}
+
+/**
+ * Fetch K-line / candlestick data from our proxy
+ * Maps Bitget response to our PriceData format
+ */
+export async function fetchPriceHistory(
+  symbol: string = 'BTCUSDT',
+  granularity: string = '1h',
+  limit: number = 100
+): Promise<import('@/types').PriceData[]> {
+  try {
+    const res = await fetch(
+      `/api/bitget/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`
+    )
+    const json = await res.json()
+
+    if (!json.data || !Array.isArray(json.data)) {
+      console.warn('fetchPriceHistory: no data array in response')
+      return []
+    }
+
+    // Our proxy already transforms arrays to objects
+    return json.data.map((c: { ts: string; open: string; high: string; low: string; close: string; quoteVol?: string; baseVol?: string; usdtVol?: string }) => ({
+      timestamp: parseInt(c.ts),
+      open: parseFloat(c.open),
+      high: parseFloat(c.high),
+      low: parseFloat(c.low),
+      close: parseFloat(c.close),
+      volume: parseFloat(c.quoteVol || c.usdtVol || c.baseVol || '0'),
+    }))
+  } catch (error) {
+    console.error('fetchPriceHistory error:', error)
+    return []
+  }
+}
+
+// ============ PRIVATE API FUNCTIONS ============
+
+/**
+ * Fetch account balance from our proxy (GET with query params)
+ */
+export async function fetchAccountBalance(
+  apiKey: string,
+  secretKey: string,
+  passphrase: string
+): Promise<{ data?: import('@/types').AccountBalance[]; error?: string; isIpError?: boolean }> {
+  try {
+    const res = await fetch(
+      `/api/bitget/balance?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&passphrase=${encodeURIComponent(passphrase)}`
+    )
+    const json = await res.json()
+
+    if (json.data && Array.isArray(json.data)) {
+      // Map Bitget account data to our format
+      const balances: import('@/types').AccountBalance[] = json.data.map((a: Record<string, string>) => ({
+        marginCoin: a.marginCoin || 'USDT',
+        coin: a.marginCoin || 'USDT',
+        available: a.available || '0',
+        frozen: a.frozen || '0',
+        total: a.equity || a.total || '0',
+        usdtValue: a.equity || '0',
+        equity: a.equity || '0',
+      }))
+      return { data: balances }
+    }
+
+    return {
+      error: json.error || json.hint || 'Unknown error',
+      isIpError: json.isIpError || false,
+    }
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : 'Network error',
+      isIpError: false,
+    }
+  }
+}
+
+/**
+ * Fetch open positions from our proxy (GET with query params)
+ */
+export async function fetchAccountPositions(
+  apiKey: string,
+  secretKey: string,
+  passphrase: string
+): Promise<{ data?: import('@/types').PositionData[]; error?: string; isIpError?: boolean }> {
+  try {
+    const res = await fetch(
+      `/api/bitget/positions?apiKey=${encodeURIComponent(apiKey)}&secretKey=${encodeURIComponent(secretKey)}&passphrase=${encodeURIComponent(passphrase)}`
+    )
+    const json = await res.json()
+
+    if (json.data && Array.isArray(json.data)) {
+      // Map Bitget position data to our format
+      const positions: import('@/types').PositionData[] = json.data.map((p: Record<string, string>) => ({
+        symbol: p.symbol || '',
+        holdSide: p.holdSide || '',
+        side: p.holdSide || p.side || '',
+        total: p.total || p.size || '0',
+        size: p.size || p.total || '0',
+        averageOpenPrice: p.averageOpenPrice || '0',
+        avgPrice: p.averageOpenPrice || p.avgPrice || '0',
+        markPrice: p.markPrice || '0',
+        unrealizedPL: p.unrealizedPL || '0',
+      }))
+      return { data: positions }
+    }
+
+    return {
+      error: json.error || json.hint || 'Unknown error',
+      isIpError: json.isIpError || false,
+    }
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : 'Network error',
+      isIpError: false,
+    }
+  }
+}
+
+/**
+ * Place order via our proxy
+ */
+export async function placeOrder(params: {
+  symbol: string
+  side: string
+  amount: number
+  price: number
+  orderType: string
+}): Promise<{ ok: boolean; data?: Record<string, string>; error?: string }> {
+  try {
+    // Get credentials from localStorage via store
+    const configStr = localStorage.getItem('bitget-config')
+    const config = configStr ? JSON.parse(configStr) : {}
+    
+    const res = await fetch('/api/bitget/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...params,
+        apiKey: config.apiKey,
+        secretKey: config.secretKey,
+        passphrase: config.passphrase,
+        tradingMode: config.tradingMode || 'simulated',
+      }),
+    })
+    return await res.json()
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Network error',
+    }
+  }
+}

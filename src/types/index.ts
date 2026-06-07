@@ -150,11 +150,13 @@ export interface BitgetConfig {
 }
 
 export interface AccountBalance {
+  marginCoin: string
   coin: string
   available: string
   frozen: string
   total: string
   usdtValue: string
+  equity: string
 }
 
 export interface PositionData {

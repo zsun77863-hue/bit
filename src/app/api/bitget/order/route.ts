@@ -1,11 +1,38 @@
 import { NextResponse } from 'next/server'
-import crypto from 'crypto'
 
-const BITGET_BASE = 'https://api.bitget.com'
+/**
+ * POST /api/bitget/order
+ * 
+ * Places an order on Bitget.
+ * For simulated mode: returns a mock order response.
+ * For real mode: calls Bitget API with proper HMAC-SHA256 signature.
+ * 
+ * Bitget API: POST /api/v2/mix/order/place-order
+ */
 
-function signRequest(timestamp: string, method: string, path: string, body: string, secretKey: string): string {
-  const preHash = timestamp + method.toUpperCase() + path + body
-  return crypto.createHmac('sha256', secretKey).update(preHash).digest('base64')
+async function signRequest(
+  timestamp: string,
+  method: string,
+  requestPath: string,
+  body: string,
+  secretKey: string
+): Promise<string> {
+  const message = timestamp + method.toUpperCase() + requestPath + body
+  const encoder = new TextEncoder()
+  const keyData = encoder.encode(secretKey)
+  const msgData = encoder.encode(message)
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgData)
+  const sigArray = Array.from(new Uint8Array(signature))
+  return btoa(String.fromCharCode(...sigArray))
 }
 
 export async function POST(request: Request) {
@@ -36,7 +63,7 @@ export async function POST(request: Request) {
     // Real order placement
     const method = 'POST'
     const requestPath = '/api/v2/mix/order/place-order'
-    const body = JSON.stringify({
+    const bodyObj = {
       symbol,
       productType: 'USDT-FUTURES',
       marginMode: 'crossed',
@@ -44,13 +71,14 @@ export async function POST(request: Request) {
       tradeSide: 'open',
       orderType: orderType || 'market',
       size: String(amount),
-      price: orderType === 'limit' ? String(price) : undefined,
-    })
+      ...(orderType === 'limit' && price ? { price: String(price) } : {}),
+    }
+    const body = JSON.stringify(bodyObj)
 
     const timestamp = Date.now().toString()
-    const sign = signRequest(timestamp, method, requestPath, body, secretKey)
+    const sign = await signRequest(timestamp, method, requestPath, body, secretKey)
 
-    const res = await fetch(`${BITGET_BASE}${requestPath}`, {
+    const res = await fetch('https://api.bitget.com' + requestPath, {
       method,
       headers: {
         'ACCESS-KEY': apiKey,
@@ -58,6 +86,7 @@ export async function POST(request: Request) {
         'ACCESS-TIMESTAMP': timestamp,
         'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json',
+        'locale': 'en-US',
       },
       body,
     })
@@ -68,9 +97,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, data: data.data })
     }
 
+    const errorMsg = data.msg || 'Failed to place order'
+    const isIpError = errorMsg.toLowerCase().includes('ip') || 
+                      errorMsg.toLowerCase().includes('whitelist') ||
+                      data.code === '40001'
+
     return NextResponse.json({
       ok: false,
-      error: data.msg || 'Failed to place order',
+      error: errorMsg,
+      isIpError,
+      hint: isIpError 
+        ? 'IP Whitelist Error: Go to Bitget > API Management > Edit > Add 0.0.0.0/0 to IP Whitelist'
+        : undefined,
     })
   } catch (error) {
     return NextResponse.json({

@@ -1,63 +1,47 @@
 import { NextResponse } from 'next/server'
 
-const BITGET_BASE = 'https://api.bitget.com'
-
 /**
- * Public API: Get ticker data for a single symbol
- * No authentication required - this is a public market data endpoint
- * Endpoint: GET /api/v2/market/tickers
+ * GET /api/bitget/ticker?symbol=BTCUSDT
+ * 
+ * Fetches a single ticker from Bitget Public API.
+ * No API key required - this is a public endpoint.
  */
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const symbol = searchParams.get('symbol') || 'BTCUSDT'
-
   try {
-    // Try USDT-FUTURES first
-    const futuresRes = await fetch(`${BITGET_BASE}/api/v2/market/tickers?productType=USDT-FUTURES&symbol=${symbol}`, {
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-    })
-    const futuresData = await futuresRes.json()
+    const { searchParams } = new URL(request.url)
+    const symbol = searchParams.get('symbol') || 'BTCUSDT'
 
-    if (futuresData.code === '00000' && futuresData.data && futuresData.data.length > 0) {
-      const t = futuresData.data[0]
-      return NextResponse.json({
-        symbol: t.symbol || symbol,
-        lastPrice: parseFloat(t.lastPr || t.last || '0'),
-        change24h: parseFloat(t.change24h || t.priceChangePercent || '0'),
-        high24h: parseFloat(t.high24h || t.high || '0'),
-        low24h: parseFloat(t.low24h || t.low || '0'),
-        volume24h: parseFloat(t.usdtVolume24h || t.quoteVolume24h || t.volume || '0'),
-      })
+    const res = await fetch(
+      `https://api.bitget.com/api/v2/market/tickers?symbol=${symbol}&productType=USDT-FUTURES`,
+      {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        next: { revalidate: 3 },
+      }
+    )
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: `Bitget API returned ${res.status}`, code: res.status },
+        { status: res.status }
+      )
     }
 
-    // Fallback to SPOT
-    const spotRes = await fetch(`${BITGET_BASE}/api/v2/market/tickers?productType=SPOT&symbol=${symbol}`, {
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-    })
-    const spotData = await spotRes.json()
+    const json = await res.json()
 
-    if (spotData.code === '00000' && spotData.data && spotData.data.length > 0) {
-      const t = spotData.data[0]
-      return NextResponse.json({
-        symbol: t.symbol || symbol,
-        lastPrice: parseFloat(t.lastPr || t.last || '0'),
-        change24h: parseFloat(t.change24h || t.priceChangePercent || '0'),
-        high24h: parseFloat(t.high24h || t.high || '0'),
-        low24h: parseFloat(t.low24h || t.low || '0'),
-        volume24h: parseFloat(t.usdtVolume24h || t.quoteVolume24h || t.volume || '0'),
-      })
+    if (json.code !== '00000') {
+      return NextResponse.json(
+        { error: json.msg || 'Bitget API error', code: json.code },
+        { status: 502 }
+      )
     }
 
-    return NextResponse.json({
-      error: `No ticker data. Futures: ${futuresData.msg || 'no data'}, Spot: ${spotData.msg || 'no data'}`,
-      symbol,
-    }, { status: 502 })
+    return NextResponse.json({ data: json.data, timestamp: Date.now() })
   } catch (error) {
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : 'Failed to fetch ticker',
-      symbol,
-    }, { status: 500 })
+    console.error('Ticker proxy error:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch ticker from Bitget', code: 'PROXY_ERROR' },
+      { status: 502 }
+    )
   }
 }

@@ -1,27 +1,68 @@
 import { NextResponse } from 'next/server'
-import crypto from 'crypto'
 
-const BITGET_BASE = 'https://api.bitget.com'
+/**
+ * GET /api/bitget/balance?apiKey=...&secretKey=...&passphrase=...
+ * 
+ * Fetches account balance from Bitget Private API.
+ * Requires: API Key, Secret Key, Passphrase
+ * 
+ * IMPORTANT: User must add their IP to Bitget API Key whitelist.
+ * Recommended: Add 0.0.0.0/0 (allow all) for testing.
+ * 
+ * Bitget API: GET /api/v2/mix/account/accounts
+ * Signature: HMAC-SHA256(timestamp + "GET" + requestPath + "", secretKey)
+ */
 
-function signRequest(timestamp: string, method: string, path: string, body: string, secretKey: string): string {
-  const preHash = timestamp + method.toUpperCase() + path + body
-  return crypto.createHmac('sha256', secretKey).update(preHash).digest('base64')
+async function signRequest(
+  timestamp: string,
+  method: string,
+  requestPath: string,
+  body: string,
+  secretKey: string
+): Promise<string> {
+  const message = timestamp + method.toUpperCase() + requestPath + body
+  const encoder = new TextEncoder()
+  const keyData = encoder.encode(secretKey)
+  const msgData = encoder.encode(message)
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgData)
+  const sigArray = Array.from(new Uint8Array(signature))
+  return btoa(String.fromCharCode(...sigArray))
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   try {
-    const { apiKey, secretKey, passphrase } = await request.json()
+    const { searchParams } = new URL(request.url)
+    const apiKey = searchParams.get('apiKey')
+    const secretKey = searchParams.get('secretKey')
+    const passphrase = searchParams.get('passphrase')
 
     if (!apiKey || !secretKey || !passphrase) {
-      return NextResponse.json({ error: 'API credentials required (API Key, Secret Key, Passphrase)' }, { status: 400 })
+      return NextResponse.json(
+        { 
+          error: 'API Key, Secret Key, and Passphrase are required',
+          isIpError: false,
+          hint: 'Please configure your Bitget API credentials in Settings.',
+        },
+        { status: 400 }
+      )
     }
 
+    const requestPath = '/api/v2/mix/account/accounts'
     const method = 'GET'
-    const requestPath = '/api/v2/mix/account/accounts?productType=USDT-FUTURES'
+    const body = ''
     const timestamp = Date.now().toString()
-    const sign = signRequest(timestamp, method, requestPath, '', secretKey)
+    const sign = await signRequest(timestamp, method, requestPath, body, secretKey)
 
-    const res = await fetch(`${BITGET_BASE}${requestPath}`, {
+    const res = await fetch('https://api.bitget.com' + requestPath, {
       method,
       headers: {
         'ACCESS-KEY': apiKey,
@@ -29,57 +70,39 @@ export async function POST(request: Request) {
         'ACCESS-TIMESTAMP': timestamp,
         'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json',
-        'X-CHANNEL-API-CODE': 'bitget_trading_agent',
+        'locale': 'en-US',
       },
     })
 
-    const data = await res.json()
+    const json = await res.json()
 
-    if (data.code === '00000') {
-      return NextResponse.json({ data: data.data, ok: true })
+    if (json.code === '00000' && Array.isArray(json.data)) {
+      return NextResponse.json({ data: json.data, timestamp: Date.now() })
     }
 
-    // Detect specific error types
-    const errorMsg = data.msg || 'Failed to fetch account balance'
-    const errorCode = data.code || ''
+    // Check for IP whitelist error
+    const errorMsg = json.msg || 'Unknown error'
+    const isIpError = errorMsg.toLowerCase().includes('ip') || 
+                      errorMsg.toLowerCase().includes('whitelist') ||
+                      errorMsg.toLowerCase().includes('access') ||
+                      json.code === '40001'
 
-    // IP whitelist error
-    if (String(errorMsg).includes('Invalid IP') || errorCode === '40001') {
-      return NextResponse.json({
-        data: null,
-        ok: false,
-        error: `Invalid IP (${extractIp(errorMsg)}). You need to add this IP or "0.0.0.0/0" to your Bitget API Key IP whitelist. Go to: Bitget > API Management > Edit > IP Whitelist`,
-        errorType: 'IP_WHITELIST',
-      })
-    }
-
-    // Authentication error
-    if (errorCode === '40002' || String(errorMsg).includes('Invalid')) {
-      return NextResponse.json({
-        data: null,
-        ok: false,
-        error: `Authentication failed: ${errorMsg}. Please check your API Key, Secret Key, and Passphrase.`,
-        errorType: 'AUTH',
-      })
-    }
-
-    return NextResponse.json({
-      data: null,
-      ok: false,
-      error: errorMsg,
-      errorType: 'API_ERROR',
-    })
+    return NextResponse.json(
+      { 
+        error: errorMsg, 
+        code: json.code,
+        isIpError,
+        hint: isIpError 
+          ? 'IP Whitelist Error: Go to Bitget > API Management > Edit > Add 0.0.0.0/0 to IP Whitelist'
+          : 'API request failed. Please check your credentials.',
+      },
+      { status: 401 }
+    )
   } catch (error) {
-    return NextResponse.json({
-      data: null,
-      ok: false,
-      error: error instanceof Error ? error.message : 'Network error',
-      errorType: 'NETWORK',
-    }, { status: 500 })
+    console.error('Balance proxy error:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch balance from Bitget', code: 'PROXY_ERROR' },
+      { status: 502 }
+    )
   }
-}
-
-function extractIp(msg: string): string {
-  const match = msg.match(/(\d+\.\d+\.\d+\.\d+)/)
-  return match ? match[1] : 'unknown'
 }
