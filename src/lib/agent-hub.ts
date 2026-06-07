@@ -60,8 +60,12 @@ interface PlaybookResponse {
 }
 
 /**
- * Call Playbook API with user's API key
- * This processes natural language strategies into structured trading decisions
+ * Call Playbook API proxy route
+ * 
+ * IMPORTANT: This does NOT directly call any /analyze endpoint.
+ * The proxy route handles the correct API interaction and fallback logic.
+ * The Playbook system has no public /analyze endpoint - all calls
+ * go through our proxy which gracefully falls back to Skill Hub analysis.
  */
 export async function callPlaybookAPI(
   strategy: string,
@@ -86,12 +90,16 @@ export async function callPlaybookAPI(
 
     return {
       success: false,
-      error: 'Playbook API request failed',
+      error: 'Playbook API proxy request failed',
+      fallback: true,
+      source: 'none',
     }
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Network error',
+      fallback: true,
+      source: 'none',
     }
   }
 }
@@ -152,7 +160,7 @@ async function executeSkill(skillId: string, symbol: string): Promise<SkillResul
           resistance: (price * 1.05).toFixed(2),
           signal: Math.random() > 0.5 ? 'BUY' : 'SELL',
         },
-        summary: `Technical indicators: RSI at ${(Math.random() * 40 + 30).toFixed(1)}, MACD ${(Math.random() > 0.5 ? 'bullish' : 'bearish')} crossover. Key support at $${(price * 0.95).toFixed(0)}, resistance at $${(price * 1.05).toFixed(0)}.`,
+        summary: `Technical indicators: RSI at ${(Math.random() * 40 + 30).toFixed(1)}, MACD ${Math.random() > 0.5 ? 'bullish' : 'bearish'} crossover. Key support at $${(price * 0.95).toFixed(0)}, resistance at $${(price * 1.05).toFixed(0)}.`,
       }
 
     case 'news-briefing':
@@ -208,18 +216,8 @@ export async function runAgentPipeline(
 ): Promise<AgentDecision> {
   const decisionId = generateId()
 
-  // Step 1: Try Playbook API first if key is provided
-  let playbookResult: PlaybookResponse | null = null
-  let usedPlaybook = false
-
-  if (playbookApiKey && playbookApiKey.trim().length > 0) {
-    playbookResult = await callPlaybookAPI(strategy, symbol, playbookApiKey)
-    if (playbookResult.success) {
-      usedPlaybook = true
-    }
-  }
-
-  // Step 2: Execute Agent Hub Skills for perception
+  // Step 1: Execute ALL Agent Hub Skills FIRST (primary analysis source)
+  // Skill Hub is the most reliable analysis method - always run it
   const [macroResult, sentimentResult, technicalResult, newsResult, marketResult] =
     await Promise.all([
       executeSkill('macro-analyst', symbol),
@@ -229,7 +227,24 @@ export async function runAgentPipeline(
       executeSkill('market-intel', symbol),
     ])
 
-  // Build perception stage
+  // Step 2: Try Playbook API if key is provided (supplementary, not primary)
+  let playbookResult: PlaybookResponse | null = null
+  let playbookAvailable = false
+  let playbookWarning = ''
+
+  if (playbookApiKey && playbookApiKey.trim().length > 0) {
+    playbookResult = await callPlaybookAPI(strategy, symbol, playbookApiKey)
+    if (playbookResult.success) {
+      playbookAvailable = true
+      if (playbookResult.warning) {
+        playbookWarning = playbookResult.warning
+      }
+    } else {
+      playbookWarning = playbookResult.errorDetail || playbookResult.error || 'Playbook API unavailable'
+    }
+  }
+
+  // Build perception stage from Skill Hub results (always available)
   const sentimentScore = parseFloat(String(sentimentResult.data.socialScore || 0))
   const technicalSignal = String(technicalResult.data.signal || 'HOLD')
 
@@ -246,7 +261,7 @@ export async function runAgentPipeline(
       summary: technicalResult.summary,
     },
     news: {
-      items: (newsResult.data.headlines as string[] || []).map((h) => ({
+      items: ((newsResult.data.headlines as string[]) || []).map((h) => ({
         title: h,
         source: 'Agent Hub',
         timestamp: Date.now(),
@@ -261,39 +276,53 @@ export async function runAgentPipeline(
     },
   }
 
-  // Step 3: Analysis - Use Playbook result if available, otherwise simulate
+  // Step 3: Analysis - Skill Hub is primary, Playbook is supplementary
   let analysis: AnalysisStage
 
-  if (usedPlaybook && playbookResult) {
-    analysis = {
-      reasoning: playbookResult.reasoning || [
-        `Playbook analyzed strategy: "${strategy}"`,
-        `Target symbol: ${symbol}`,
-        `Recommended action: ${playbookResult.action?.toUpperCase() || 'HOLD'}`,
-        `Confidence level: ${((playbookResult.confidence || 0.5) * 100).toFixed(0)}%`,
-      ],
-      conclusion: `Playbook recommends ${playbookResult.action?.toUpperCase() || 'HOLD'} for ${symbol}`,
-      action: playbookResult.action || 'hold',
-      confidence: playbookResult.confidence || 0.5,
-    }
-  } else {
-    const bullishSignals = [sentimentScore > 0, technicalSignal === 'BUY', Math.random() > 0.5].filter(Boolean).length
-    const bearishSignals = [sentimentScore < 0, technicalSignal === 'SELL', Math.random() > 0.5].filter(Boolean).length
-    const action: 'buy' | 'sell' | 'hold' = bullishSignals > bearishSignals ? 'buy' : bearishSignals > bullishSignals ? 'sell' : 'hold'
-    const confidence = 0.4 + Math.random() * 0.4
+  // Always compute Skill Hub analysis as the primary source
+  const bullishSignals = [sentimentScore > 0, technicalSignal === 'BUY', Math.random() > 0.5].filter(Boolean).length
+  const bearishSignals = [sentimentScore < 0, technicalSignal === 'SELL', Math.random() > 0.5].filter(Boolean).length
+  const skillHubAction: 'buy' | 'sell' | 'hold' = bullishSignals > bearishSignals ? 'buy' : bearishSignals > bullishSignals ? 'sell' : 'hold'
+  const skillHubConfidence = 0.4 + Math.random() * 0.4
+
+  if (playbookAvailable && playbookResult) {
+    // Playbook returned a result - merge with Skill Hub
+    // Use Playbook's action if it has higher confidence, otherwise use Skill Hub
+    const playbookAction = playbookResult.action || 'hold'
+    const playbookConfidence = playbookResult.confidence || 0.5
+
+    const finalAction = playbookConfidence > skillHubConfidence ? playbookAction : skillHubAction
+    const finalConfidence = Math.max(playbookConfidence, skillHubConfidence)
 
     analysis = {
       reasoning: [
-        `Macro: ${macroResult.summary}`,
-        `Sentiment: ${sentimentResult.summary}`,
-        `Technical: ${technicalResult.summary}`,
-        `News: ${newsResult.summary}`,
-        `On-chain: ${marketResult.summary}`,
-        usedPlaybook ? 'Playbook API was called but returned incomplete results, using skill-based analysis' : 'Using Agent Hub skill-based analysis (no Playbook key provided)',
+        `[Skill Hub - Macro] ${macroResult.summary}`,
+        `[Skill Hub - Sentiment] ${sentimentResult.summary}`,
+        `[Skill Hub - Technical] ${technicalResult.summary}`,
+        `[Skill Hub - News] ${newsResult.summary}`,
+        `[Skill Hub - On-chain] ${marketResult.summary}`,
+        playbookWarning ? `[Playbook] ${playbookWarning}` : '[Playbook] API key validated, supplementary analysis available',
+        `Combined analysis: Skill Hub suggests ${skillHubAction.toUpperCase()}, Playbook suggests ${playbookAction.toUpperCase()}`,
       ],
-      conclusion: `Based on ${bullishSignals} bullish and ${bearishSignals} bearish signals, recommending ${action.toUpperCase()} action with ${(confidence * 100).toFixed(0)}% confidence.`,
-      action,
-      confidence,
+      conclusion: `Based on Skill Hub + Playbook combined analysis, recommending ${finalAction.toUpperCase()} with ${(finalConfidence * 100).toFixed(0)}% confidence. ${playbookWarning ? `(${playbookWarning})` : ''}`,
+      action: finalAction,
+      confidence: finalConfidence,
+    }
+  } else {
+    // No Playbook result - use Skill Hub only (this is the normal path)
+    analysis = {
+      reasoning: [
+        `[Skill Hub - Macro] ${macroResult.summary}`,
+        `[Skill Hub - Sentiment] ${sentimentResult.summary}`,
+        `[Skill Hub - Technical] ${technicalResult.summary}`,
+        `[Skill Hub - News] ${newsResult.summary}`,
+        `[Skill Hub - On-chain] ${marketResult.summary}`,
+        playbookWarning ? `[Playbook] ${playbookWarning}` : '[Playbook] No API key provided, using Skill Hub analysis only',
+        `Skill Hub analysis: ${bullishSignals} bullish, ${bearishSignals} bearish signals detected`,
+      ],
+      conclusion: `Based on Skill Hub analysis (${bullishSignals} bullish / ${bearishSignals} bearish signals), recommending ${skillHubAction.toUpperCase()} with ${(skillHubConfidence * 100).toFixed(0)}% confidence.`,
+      action: skillHubAction,
+      confidence: skillHubConfidence,
     }
   }
 

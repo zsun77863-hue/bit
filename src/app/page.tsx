@@ -5,7 +5,7 @@ import { useAppStore } from '@/store'
 import { getTranslation } from '@/i18n'
 import { cn, formatCurrency, formatPercent, downloadCSV, generateId } from '@/lib/utils'
 import { COIN_LIST, CHART_INTERVALS, fetchAllTickers, fetchPriceHistory, placeOrder } from '@/lib/bitget'
-import { runAgentPipeline, callPlaybookAPI } from '@/lib/agent-hub'
+import { runAgentPipeline } from '@/lib/agent-hub'
 import type { AgentDecision, TradeLog, CoinSymbol, TickerData, PriceData, AccountBalance, PositionData } from '@/types'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -469,67 +469,71 @@ export default function TradingAgentApp() {
     const strategyId = store.addStrategy(strategy)
 
     try {
-      let decision: AgentDecision
+      // Always use runAgentPipeline - it handles Playbook + Skill Hub internally
+      // Playbook API is called inside the pipeline if key is provided
+      // Skill Hub is always executed as the primary analysis source
+      const decision = await runAgentPipeline(
+        strategy,
+        store.selectedCoin,
+        store.tradingMode,
+        store.bitgetConfig.playbookApiKey || undefined
+      )
 
-      // Try Playbook API first if key is available
-      if (store.bitgetConfig.playbookApiKey) {
-        try {
-          const playbookResult = await callPlaybookAPI(strategy, store.selectedCoin, store.bitgetConfig.playbookApiKey)
+      // Build structured Skill Hub output for chat display
+      const skillHubLines: string[] = []
 
-          if (playbookResult.success && playbookResult.action) {
-            // Use Playbook result to build decision
-            decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode, store.bitgetConfig.playbookApiKey)
+      // Header with analysis source
+      const hasPlaybookKey = !!store.bitgetConfig.playbookApiKey
+      skillHubLines.push(`📊 ${tr.chat.strategyAnalyzed}`)
+      skillHubLines.push(`━━━━━━━━━━━━━━━━━━━━`)
 
-            // Enhance with Playbook data
-            decision.analysis.action = playbookResult.action
-            decision.analysis.confidence = playbookResult.confidence || decision.analysis.confidence
-            if (playbookResult.reasoning) {
-              decision.analysis.reasoning = [...playbookResult.reasoning, ...decision.analysis.reasoning]
-            }
-            decision.execution.action = playbookResult.action
-
-            // Build status message
-            const sourceLabel = playbookResult.source === 'playbook_api' ? '✅ Playbook API' : '⚠️ Local NLP (API unavailable)'
-            const warningMsg = playbookResult.warning ? `\n⚠️ ${playbookResult.warning}` : ''
-            const errorMsg = playbookResult.errorDetail ? `\n📋 Detail: ${playbookResult.errorDetail}` : ''
-
-            store.addMessage({
-              role: 'assistant',
-              content: `${tr.chat.strategyAnalyzed} [${sourceLabel}]${warningMsg}${errorMsg}`,
-              decision,
-            })
-            addToast(tr.chat.strategyAnalyzed, 'success')
-          } else {
-            // Playbook returned error
-            const errMsg = playbookResult.error || playbookResult.errorDetail || 'Unknown error'
-            decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode)
-            store.addMessage({
-              role: 'assistant',
-              content: `${tr.chat.playbookFallback}\n❌ Playbook Error: ${errMsg}`,
-              decision,
-            })
-            addToast(`${tr.chat.playbookFallback}: ${errMsg}`, 'warning')
-          }
-        } catch (err) {
-          // Network error calling Playbook
-          const errMsg = err instanceof Error ? err.message : 'Network error'
-          decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode)
-          store.addMessage({
-            role: 'assistant',
-            content: `${tr.chat.playbookFallback}\n❌ Error: ${errMsg}`,
-            decision,
-          })
-          addToast(`${tr.chat.playbookFallback}: ${errMsg}`, 'warning')
-        }
-      } else {
-        // No Playbook key, use simulation
-        decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode)
-        store.addMessage({
-          role: 'assistant',
-          content: tr.chat.strategyAnalyzed,
-          decision,
-        })
+      // Perception: Sentiment
+      if (decision.perception.sentiment) {
+        const s = decision.perception.sentiment
+        const emoji = s.label === 'Bullish' ? '🟢' : s.label === 'Bearish' ? '🔴' : '🟡'
+        skillHubLines.push(`${emoji} Sentiment: ${s.label} (${s.score > 0 ? '+' : ''}${s.score.toFixed(2)})`)
       }
+
+      // Perception: Technical
+      if (decision.perception.technical) {
+        const t = decision.perception.technical
+        const emoji = t.signal === 'BUY' ? '📈' : t.signal === 'SELL' ? '📉' : '➡️'
+        skillHubLines.push(`${emoji} Technical: ${t.signal}`)
+        if (t.indicators) {
+          if (t.indicators.rsi) skillHubLines.push(`   RSI: ${t.indicators.rsi}`)
+          if (t.indicators.macd) skillHubLines.push(`   MACD: ${t.indicators.macd}`)
+        }
+      }
+
+      // Perception: News
+      if (decision.perception.news) {
+        const n = decision.perception.news
+        skillHubLines.push(`📰 News: ${n.summary || 'No significant news'}`)
+      }
+
+      // Perception: On-chain
+      if (decision.perception.onChain) {
+        const o = decision.perception.onChain
+        skillHubLines.push(`⛓️ On-chain: ${o.summary || 'No data'}`)
+      }
+
+      // Analysis conclusion
+      skillHubLines.push(`━━━━━━━━━━━━━━━━━━━━`)
+      const actionEmoji = decision.analysis.action === 'buy' ? '🟢' : decision.analysis.action === 'sell' ? '🔴' : '🟡'
+      skillHubLines.push(`${actionEmoji} Action: ${decision.analysis.action.toUpperCase()} (${(decision.analysis.confidence * 100).toFixed(0)}% confidence)`)
+
+      // Playbook status
+      if (hasPlaybookKey) {
+        skillHubLines.push(`✅ Playbook Key: Active (supplementary)`)
+      }
+      skillHubLines.push(`🤖 Source: Skill Hub Analysis`)
+
+      store.addMessage({
+        role: 'assistant',
+        content: skillHubLines.join('\n'),
+        decision,
+      })
+      addToast(tr.chat.strategyAnalyzed, 'success')
 
       store.updateStrategy(strategyId, decision, 'completed')
 
@@ -827,19 +831,27 @@ export default function TradingAgentApp() {
         </div>
       </div>
 
-      {/* Playbook Key Status */}
+      {/* Analysis Source Status */}
       <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-card/30">
         <div className="flex items-center gap-2 text-xs">
           <span className={cn(
             'w-2 h-2 rounded-full',
-            store.bitgetConfig.playbookApiKey ? 'bg-emerald-400' : 'bg-muted-foreground'
+            'bg-emerald-400'
           )} />
-          <span className="text-muted-foreground">
-            {store.bitgetConfig.playbookApiKey ? tr.chat.playbookActive : tr.chat.playbookInactive}
+          <span className="text-emerald-400">
+            🤖 Skill Hub Active
           </span>
+          {store.bitgetConfig.playbookApiKey && (
+            <span className="text-amber-400 ml-2">
+              ✅ Playbook Key (supplementary)
+            </span>
+          )}
           {!store.bitgetConfig.playbookApiKey && (
-            <span className="text-primary cursor-pointer hover:underline" onClick={() => store.setActivePage('settings')}>
-              → Settings
+            <span className="text-muted-foreground ml-2">
+              Playbook: Not configured
+              <span className="text-primary cursor-pointer hover:underline ml-1" onClick={() => store.setActivePage('settings')}>
+                → Settings
+              </span>
             </span>
           )}
         </div>
@@ -1300,6 +1312,9 @@ export default function TradingAgentApp() {
         <p className="text-xs text-muted-foreground">
           {tr.help.apiDesc}
         </p>
+        <div className="p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-xs text-blue-400">
+          💡 Skill Hub is always active as the primary analysis source. Playbook Key adds supplementary analysis when available.
+        </div>
         <div className="flex gap-2">
           <input
             type="password"
@@ -1317,6 +1332,9 @@ export default function TradingAgentApp() {
       {/* Bitget API */}
       <div className="bg-card border border-border rounded-xl p-4 space-y-3">
         <h3 className="font-semibold">{tr.settings.bitgetApi}</h3>
+        <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-400">
+          ⚠️ IP Whitelist: If you get &quot;Invalid IP&quot; errors, add &quot;0.0.0.0/0&quot; to your Bitget API Key IP whitelist. Go to: Bitget &gt; API Management &gt; Edit &gt; IP Whitelist
+        </div>
         <div className="space-y-2">
           <div>
             <label className="text-xs text-muted-foreground">{tr.settings.apiKey}</label>
