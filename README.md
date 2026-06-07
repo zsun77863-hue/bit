@@ -17,42 +17,18 @@ Bitget Trading Agent is a modern, AI-powered web application that allows users t
 
 - **Natural Language Strategy Input** — Type trading strategies in plain English or Chinese
 - **Bitget Agent Hub Integration** — Deep integration with official skills (macro-analyst, sentiment-analyst, technical-analysis, news-briefing, market-intel)
+- **Playbook API Integration** — Real API calls when Playbook API Key is provided, with fallback to simulation
+- **Real-Time Price Data** — Live prices from Bitget REST API with 5-10s polling, Recharts candlestick charts
 - **Transparent Decision Flow** — Watch the agent's Perception → Analysis → Execution → Risk Management pipeline in real-time
+- **Account Balance & Positions** — Query real Bitget account balance and positions with proper HMAC-SHA256 signing
 - **Performance Dashboard** — Win rate, total PnL, max drawdown, Sharpe ratio, profit factor charts
-- **Multi-Coin Price Charts** — Real-time/historical price charts for BTC, ETH, SOL, BNB, XRP, DOGE
+- **Multi-Coin Price Charts** — Real-time/historical candlestick charts for BTC, ETH, SOL, BNB, XRP, DOGE with 1m/5m/15m/1H/4H/1D intervals
 - **Simulated / Real Mode** — Safe simulated trading by default; real mode with confirmation
-- **Strategy History** — Local storage with re-run and delete capabilities
-- **Trade Log Export** — Export trade history as CSV
-- **Bilingual UI** — Full English and Chinese support
-- **Dark / Light Theme** — Modern dark-first design with light mode toggle
-- **PWA Support** — Install as a mobile app for native-like experience
-- **Responsive Design** — Optimized for desktop, tablet, and mobile
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│                   Frontend                       │
-│  Next.js 14 + TypeScript + Tailwind CSS          │
-│  Zustand (State) + Canvas Charts                 │
-├─────────────────────────────────────────────────┤
-│                API Routes                        │
-│  /api/bitget/ticker  - Market data               │
-│  /api/bitget/candles - Price history             │
-│  /api/bitget/order   - Order placement           │
-│  /api/agent/process  - Strategy processing       │
-├─────────────────────────────────────────────────┤
-│            Bitget Agent Hub                      │
-│  macro-analyst | sentiment-analyst               │
-│  technical-analysis | news-briefing              │
-│  market-intel | Playbook API                     │
-├─────────────────────────────────────────────────┤
-│              Bitget Exchange API                 │
-│  REST API | WebSocket | Sub-accounts             │
-└─────────────────────────────────────────────────┘
-```
+- **Strategy History** — Local storage with delete/rerun support
+- **Trade Log Export** — CSV download of all trade records
+- **Bilingual UI** — Full English/Chinese support
+- **Dark/Light Theme** — Modern dark-first design
+- **PWA + Responsive** — Mobile-optimized, installable as app
 
 ---
 
@@ -60,9 +36,8 @@ Bitget Trading Agent is a modern, AI-powered web application that allows users t
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - npm or bun
-- Bitget API credentials (for real trading)
 
 ### Installation
 
@@ -83,198 +58,88 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+---
+
+## 🔑 API Configuration
+
+### Bitget API Keys
+
+1. Go to [Bitget API Management](https://www.bitget.com/api/common/api-key)
+2. Create an API key with trading permissions
+3. For simulated trading, create a **sub-account** with demo trading enabled
+4. Enter your keys in the **Settings** page or `.env.local`
+
+### Playbook API Key
+
+1. Get your Playbook API Key from [Bitget Agent Hub](https://github.com/Bitget-AI/agent_hub)
+2. Enter it in the **Settings** page or `.env.local`
+3. When active, natural language strategies are processed through the Playbook API
+
 ### Environment Variables
 
-Copy `.env.example` to `.env.local` and fill in your credentials:
-
 ```env
-# Bitget API Configuration
-BITGET_API_KEY=your_bitget_api_key_here
-BITGET_SECRET_KEY=your_bitget_secret_key_here
-BITGET_PASSPHRASE=your_bitget_passphrase_here
+# Bitget API (for real trading)
+BITGET_API_KEY=your_api_key
+BITGET_SECRET_KEY=your_secret_key
+BITGET_PASSPHRASE=your_passphrase
 
-# Playbook API Key (for natural language strategy processing)
-PLAYBOOK_API_KEY=your_playbook_api_key_here
+# Playbook API (for natural language strategy processing)
+PLAYBOOK_API_KEY=your_playbook_key
 
-# App Configuration
+# App config
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-NEXT_PUBLIC_APP_NAME=Bitget Trading Agent
-
-# Optional: Sub-account configuration
-BITGET_SUB_ACCOUNT_ID=
 ```
 
 ---
 
-## 📖 Usage Guide
+## 🏗️ Project Structure
 
-### 1. Chat Interface
-
-Enter trading strategies in natural language:
-
-- "Buy BTC when RSI drops below 30, sell when RSI exceeds 70"
-- "Monitor ETH sentiment, go long when sentiment turns positive"
-- "Set 5% stop-loss for SOL position, take profit at 15%"
-- "DCA into BTC weekly, $100 per week"
-
-### 2. Agent Decision Flow
-
-When you submit a strategy, the agent follows a transparent pipeline:
-
-1. **Perception** — Gathers market data via Agent Hub skills
-   - Price data, sentiment scores, technical indicators, news, on-chain metrics
-2. **Analysis** — Processes data and generates reasoning
-   - Step-by-step logic with confidence scoring
-3. **Execution** — Places simulated or real orders
-   - Market/limit orders with order IDs
-4. **Risk Management** — Calculates risk parameters
-   - Stop-loss, take-profit, position sizing, max drawdown
-
-### 3. Dashboard
-
-Monitor your trading performance:
-- **Portfolio Overview** — Balance, positions, PnL
-- **Performance Metrics** — Win rate, Sharpe ratio, profit factor
-- **Price Charts** — Multi-coin candlestick-style charts
-- **Trade Log** — Full history with CSV export
-
-### 4. Mode Switching
-
-- **Simulated Mode** (default) — All trades are virtual, no real money at risk
-- **Real Mode** — Requires API keys and double confirmation
-
----
-
-## 🔧 Bitget Agent Hub Integration
-
-This project deeply integrates with the [Bitget Agent Hub](https://github.com/Bitget-AI/agent_hub):
-
-### Skills Used
-
-| Skill | Description | Category |
-|-------|-------------|----------|
-| `macro-analyst` | Macroeconomic analysis and market trends | Analysis |
-| `sentiment-analyst` | Social media and news sentiment | Analysis |
-| `technical-analysis` | RSI, MACD, Bollinger Bands | Analysis |
-| `news-briefing` | Crypto news aggregation | Info |
-| `market-intel` | Market intelligence and on-chain metrics | Info |
-
-### Integration Methods
-
-- **MCP Server** — Model Context Protocol for AI agent communication
-- **REST API** — Direct HTTP calls to Bitget endpoints
-- **CLI Style** — Command-line interface for skill execution
-- **Playbook API** — Natural language to strategy conversion
-
-### Sub-Account Setup
-
-For simulated trading, create a Bitget sub-account:
-
-1. Log in to your Bitget account
-2. Go to **Settings → Sub-account Management**
-3. Create a new sub-account for trading
-4. Generate API keys for the sub-account
-5. Add the credentials to `.env.local`
-
----
-
-## 🌐 Netlify Deployment
-
-### Step 1: Prepare for Deployment
-
-```bash
-# Build the project
-npm run build
 ```
-
-### Step 2: Deploy to Netlify
-
-1. Push your code to GitHub
-2. Go to [Netlify](https://netlify.com)
-3. Click "New site from Git"
-4. Select your repository
-5. Configure build settings:
-   - **Build command**: `npm run build`
-   - **Publish directory**: `.next`
-6. Add environment variables in Netlify dashboard
-7. Deploy!
-
-### Alternative: Netlify CLI
-
-```bash
-npm install -g netlify-cli
-netlify login
-netlify init
-netlify deploy --prod
+src/
+├── app/
+│   ├── api/
+│   │   ├── bitget/
+│   │   │   ├── ticker/route.ts     # Real-time ticker (public)
+│   │   │   ├── tickers/route.ts    # All tickers (public)
+│   │   │   ├── candles/route.ts    # Candlestick data (public)
+│   │   │   ├── balance/route.ts    # Account balance (authenticated)
+│   │   │   ├── positions/route.ts  # Open positions (authenticated)
+│   │   │   └── order/route.ts      # Place orders (authenticated)
+│   │   └── agent/
+│   │       ├── playbook/route.ts   # Playbook API proxy
+│   │       └── process/route.ts    # Agent processing
+│   ├── page.tsx                    # Main application
+│   ├── layout.tsx                  # Root layout
+│   └── globals.css                 # Global styles + CSS variables
+├── lib/
+│   ├── bitget-sign.ts             # HMAC-SHA256 signing for Bitget API
+│   ├── bitget.ts                  # Bitget API client
+│   ├── agent-hub.ts               # Agent Hub + Playbook integration
+│   └── utils.ts                   # Utility functions
+├── store/
+│   └── index.ts                   # Zustand state management
+├── types/
+│   └── index.ts                   # TypeScript type definitions
+└── i18n/
+    ├── en.ts                      # English translations
+    ├── zh.ts                      # Chinese translations
+    └── index.ts                   # i18n utilities
 ```
 
 ---
 
-## 🏆 Hackathon Submission Guide
+## 🔐 Bitget API Signing
 
-### Project Information
-
-- **Project Name**: Bitget Trading Agent
-- **Category**: AI + DeFi Trading
-- **Tech Stack**: Next.js 14, TypeScript, Tailwind CSS, Bitget Agent Hub
-
-### Submission Checklist
-
-- [x] Working demo with simulated trading
-- [x] Bitget Agent Hub integration
-- [x] Transparent AI decision flow
-- [x] Multi-language support (EN/CN)
-- [x] Responsive design + PWA
-- [x] Clean code with TypeScript
-- [x] Complete documentation
-
-### Demo Video Script
-
-1. Show the chat interface with a natural language strategy
-2. Demonstrate the transparent decision flow
-3. Switch to Dashboard to show performance metrics
-4. Toggle between simulated and real mode
-5. Show mobile responsive design
-6. Export trade log as CSV
-
----
-
-## 📁 Project Structure
+All authenticated Bitget API requests use HMAC-SHA256 signing:
 
 ```
-bitget-trading-agent/
-├── public/
-│   └── manifest.json          # PWA manifest
-├── src/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── agent/process/ # Strategy processing API
-│   │   │   └── bitget/
-│   │   │       ├── ticker/    # Market data API
-│   │   │       ├── candles/   # Price history API
-│   │   │       └── order/     # Order placement API
-│   │   ├── globals.css        # Global styles + CSS variables
-│   │   ├── layout.tsx         # Root layout
-│   │   └── page.tsx           # Main application page
-│   ├── i18n/
-│   │   ├── en.ts              # English translations
-│   │   ├── zh.ts              # Chinese translations
-│   │   └── index.ts           # i18n utilities
-│   ├── lib/
-│   │   ├── agent-hub.ts       # Agent Hub integration
-│   │   ├── bitget.ts          # Bitget API client
-│   │   └── utils.ts           # Utility functions
-│   ├── store/
-│   │   └── index.ts           # Zustand state management
-│   └── types/
-│       └── index.ts           # TypeScript type definitions
-├── .env.example               # Environment variable template
-├── .env.local                 # Local environment variables
-├── tailwind.config.ts         # Tailwind CSS configuration
-├── next.config.mjs            # Next.js configuration
-├── tsconfig.json              # TypeScript configuration
-└── package.json               # Dependencies
+1. Construct pre-hash: timestamp + METHOD + requestPath + body
+2. Sign with HMAC-SHA256 using secretKey
+3. Base64 encode the signature
+4. Add headers: ACCESS-KEY, ACCESS-SIGN, ACCESS-TIMESTAMP, ACCESS-PASSPHRASE
 ```
+
+Reference: [Bitget API Documentation](https://www.bitget.com/api-doc/common/intro)
 
 ---
 
@@ -286,9 +151,41 @@ bitget-trading-agent/
 | TypeScript | Type-safe development |
 | Tailwind CSS | Utility-first styling |
 | Zustand | Lightweight state management |
-| Canvas API | Custom chart rendering |
-| Bitget API | Exchange integration |
+| Recharts | Candlestick & performance charts |
+| Bitget REST API | Real-time market data & trading |
 | Bitget Agent Hub | AI skill execution |
+| Playbook API | Natural language strategy processing |
+
+---
+
+## 📱 PWA Support
+
+The app is PWA-ready with:
+- `manifest.json` for installability
+- Responsive design for all screen sizes
+- Touch-friendly mobile navigation
+- Dark theme optimized for OLED screens
+
+---
+
+## 🚢 Netlify Deployment
+
+1. Connect your GitHub repo to Netlify
+2. Set build command: `npm run build`
+3. Set publish directory: `.next`
+4. Add environment variables in Netlify dashboard
+5. Deploy!
+
+Or use `netlify.toml`:
+
+```toml
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+```
 
 ---
 
@@ -300,9 +197,10 @@ MIT License — feel free to use this project for your own trading agents!
 
 ## 🙏 Acknowledgments
 
-- [Bitget Agent Hub](https://github.com/Bitget-AI/agent_hub) — Official Bitget AI agent framework
+- [Bitget Agent Hub](https://github.com/Bitget-AI/agent_hub) — Official Bitget AI agent framework & Playbook API
+- [Bitget API Docs](https://www.bitget.com/api-doc/common/intro) — REST API reference & signing specification
 - [Next.js](https://nextjs.org/) — React framework
-- [Tailwind CSS](https://tailwindcss.com/) — CSS framework
+- [Recharts](https://recharts.org/) — Chart library
 - [Zustand](https://github.com/pmndrs/zustand) — State management
 
 ---

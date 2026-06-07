@@ -10,45 +10,16 @@ function signRequest(timestamp: string, method: string, path: string, body: stri
 
 export async function POST(request: Request) {
   try {
-    const { apiKey, secretKey, passphrase, symbol, side, amount, price, orderType, tradingMode } = await request.json()
+    const { apiKey, secretKey, passphrase } = await request.json()
 
     if (!apiKey || !secretKey || !passphrase) {
       return NextResponse.json({ error: 'API credentials required' }, { status: 400 })
     }
 
-    if (tradingMode === 'simulated') {
-      return NextResponse.json({
-        ok: true,
-        data: {
-          orderId: `sim_${Date.now()}`,
-          symbol,
-          side,
-          amount,
-          price,
-          orderType: orderType || 'market',
-          status: 'filled',
-          timestamp: Date.now(),
-          simulated: true,
-        },
-      })
-    }
-
-    // Real order placement
-    const method = 'POST'
-    const requestPath = '/api/v2/mix/order/place-order'
-    const body = JSON.stringify({
-      symbol,
-      productType: 'USDT-FUTURES',
-      marginMode: 'crossed',
-      side: side === 'buy' ? 'buy' : 'sell',
-      tradeSide: 'open',
-      orderType: orderType || 'market',
-      size: String(amount),
-      price: orderType === 'limit' ? String(price) : undefined,
-    })
-
+    const method = 'GET'
+    const requestPath = '/api/v2/mix/account/accounts?productType=USDT-FUTURES'
     const timestamp = Date.now().toString()
-    const sign = signRequest(timestamp, method, requestPath, body, secretKey)
+    const sign = signRequest(timestamp, method, requestPath, '', secretKey)
 
     const res = await fetch(`${BITGET_BASE}${requestPath}`, {
       method,
@@ -59,21 +30,22 @@ export async function POST(request: Request) {
         'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json',
       },
-      body,
     })
 
     const data = await res.json()
 
     if (data.code === '00000') {
-      return NextResponse.json({ ok: true, data: data.data })
+      return NextResponse.json({ data: data.data, ok: true })
     }
 
     return NextResponse.json({
+      data: null,
       ok: false,
-      error: data.msg || 'Failed to place order',
+      error: data.msg || 'Failed to fetch account balance',
     })
   } catch (error) {
     return NextResponse.json({
+      data: null,
       ok: false,
       error: error instanceof Error ? error.message : 'Network error',
     }, { status: 500 })

@@ -1,9 +1,6 @@
 export type Language = 'en' | 'zh'
-
 export type Theme = 'dark' | 'light'
-
 export type TradingMode = 'simulated' | 'real'
-
 export type CoinSymbol = 'BTCUSDT' | 'ETHUSDT' | 'SOLUSDT' | 'BNBUSDT' | 'XRPUSDT' | 'DOGEUSDT'
 
 export interface PriceData {
@@ -63,7 +60,16 @@ export interface PerceptionStage {
 export interface AnalysisStage {
   reasoning: string[]
   conclusion: string
+  action: 'buy' | 'sell' | 'hold'
   confidence: number
+}
+
+export interface NewsItem {
+  title: string
+  source: string
+  timestamp: number
+  sentiment: 'positive' | 'negative' | 'neutral'
+  summary: string
 }
 
 export interface ExecutionStage {
@@ -83,14 +89,6 @@ export interface RiskStage {
   maxDrawdown: number
   riskRewardRatio: number
   pnl?: number
-}
-
-export interface NewsItem {
-  title: string
-  source: string
-  timestamp: number
-  sentiment: 'positive' | 'negative' | 'neutral'
-  summary: string
 }
 
 export interface StrategyHistory {
@@ -149,4 +147,26 @@ export interface BitgetConfig {
   secretKey: string
   passphrase: string
   playbookApiKey: string
+}
+
+export interface AccountBalance {
+  coin: string
+  available: string
+  frozen: string
+  total: string
+  usdtValue: string
+}
+
+export interface PositionData {
+  symbol: string
+  holdSide: string
+  side: string
+  size: string
+  total: string
+  avgPrice: string
+  averageOpenPrice: string
+  markPrice: string
+  unrealizedPL: string
+  leverage: string
+  margin: string
 }

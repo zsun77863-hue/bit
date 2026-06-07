@@ -14,6 +14,8 @@ import type {
   CoinSymbol,
   TickerData,
   PriceData,
+  AccountBalance,
+  PositionData,
 } from '@/types'
 import { generateId } from '@/lib/utils'
 
@@ -58,6 +60,16 @@ interface AppState {
   balance: number
   setBalance: (balance: number) => void
 
+  // Account (real Bitget data)
+  accountBalances: AccountBalance[]
+  setAccountBalances: (balances: AccountBalance[]) => void
+  positions: PositionData[]
+  setPositions: (positions: PositionData[]) => void
+  accountLoading: boolean
+  setAccountLoading: (loading: boolean) => void
+  accountError: string | null
+  setAccountError: (error: string | null) => void
+
   // Performance
   performanceMetrics: PerformanceMetrics
   setPerformanceMetrics: (metrics: PerformanceMetrics) => void
@@ -69,6 +81,8 @@ interface AppState {
   // Price Data
   selectedCoin: CoinSymbol
   setSelectedCoin: (coin: CoinSymbol) => void
+  chartInterval: string
+  setChartInterval: (interval: string) => void
   tickerData: Record<string, TickerData>
   setTickerData: (data: Record<string, TickerData>) => void
   priceHistory: PriceData[]
@@ -161,6 +175,16 @@ export const useAppStore = create<AppState>()(
       balance: 100000,
       setBalance: (balance) => set({ balance }),
 
+      // Account
+      accountBalances: [],
+      setAccountBalances: (accountBalances) => set({ accountBalances }),
+      positions: [],
+      setPositions: (positions) => set({ positions }),
+      accountLoading: false,
+      setAccountLoading: (accountLoading) => set({ accountLoading }),
+      accountError: null,
+      setAccountError: (accountError) => set({ accountError }),
+
       // Performance
       performanceMetrics: defaultPerformance,
       setPerformanceMetrics: (performanceMetrics) => set({ performanceMetrics }),
@@ -180,6 +204,8 @@ export const useAppStore = create<AppState>()(
       // Price Data
       selectedCoin: 'BTCUSDT',
       setSelectedCoin: (selectedCoin) => set({ selectedCoin }),
+      chartInterval: '1h',
+      setChartInterval: (chartInterval) => set({ chartInterval }),
       tickerData: {},
       setTickerData: (tickerData) => set({ tickerData }),
       priceHistory: [],
@@ -202,6 +228,7 @@ export const useAppStore = create<AppState>()(
         performanceMetrics: state.performanceMetrics,
         bitgetConfig: state.bitgetConfig,
         selectedCoin: state.selectedCoin,
+        chartInterval: state.chartInterval,
       }),
     }
   )
