@@ -53,6 +53,10 @@ interface PlaybookResponse {
   stopLoss?: number
   takeProfit?: number
   error?: string
+  errorDetail?: string
+  warning?: string
+  source?: string
+  fallback?: boolean
 }
 
 /**

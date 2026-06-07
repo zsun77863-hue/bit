@@ -29,6 +29,7 @@ export async function POST(request: Request) {
         'ACCESS-TIMESTAMP': timestamp,
         'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json',
+        'X-CHANNEL-API-CODE': 'bitget_trading_agent',
       },
     })
 
@@ -38,16 +39,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: data.data, ok: true })
     }
 
+    const errorMsg = data.msg || 'Failed to fetch positions'
+    const errorCode = data.code || ''
+
+    if (String(errorMsg).includes('Invalid IP') || errorCode === '40001') {
+      return NextResponse.json({
+        data: null,
+        ok: false,
+        error: `Invalid IP. Add "0.0.0.0/0" to your Bitget API Key IP whitelist.`,
+        errorType: 'IP_WHITELIST',
+      })
+    }
+
+    if (errorCode === '40002' || String(errorMsg).includes('Invalid')) {
+      return NextResponse.json({
+        data: null,
+        ok: false,
+        error: `Authentication failed: ${errorMsg}`,
+        errorType: 'AUTH',
+      })
+    }
+
     return NextResponse.json({
       data: null,
       ok: false,
-      error: data.msg || 'Failed to fetch positions',
+      error: errorMsg,
+      errorType: 'API_ERROR',
     })
   } catch (error) {
     return NextResponse.json({
       data: null,
       ok: false,
       error: error instanceof Error ? error.message : 'Network error',
+      errorType: 'NETWORK',
     }, { status: 500 })
   }
 }

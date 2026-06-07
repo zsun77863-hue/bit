@@ -364,19 +364,26 @@ export default function TradingAgentApp() {
   // ============ REAL-TIME PRICE POLLING ============
   const refreshPrices = useCallback(async () => {
     try {
+      // Fetch all tickers (single API call for efficiency)
       const tickers = await fetchAllTickers()
-      store.setTickerData(tickers)
+      if (Object.keys(tickers).length > 0) {
+        store.setTickerData(tickers)
+      }
+
+      // Fetch candlestick data for selected coin
       const history = await fetchPriceHistory(store.selectedCoin, store.chartInterval, 100)
-      store.setPriceHistory(history)
+      if (history.length > 0) {
+        store.setPriceHistory(history)
+      }
     } catch {
-      // silently fail
+      // silently fail - will retry on next poll
     }
   }, [store.selectedCoin, store.chartInterval])
 
   useEffect(() => {
     refreshPrices()
-    // Poll every 8 seconds for real-time data
-    pollingRef.current = setInterval(refreshPrices, 8000)
+    // Poll every 5 seconds for real-time data
+    pollingRef.current = setInterval(refreshPrices, 5000)
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current)
     }
@@ -413,9 +420,18 @@ export default function TradingAgentApp() {
       const balData = await balRes.json()
       const posData = await posRes.json()
 
+      // Check for IP whitelist error
+      const isIpError = (balData.error && String(balData.error).includes('Invalid IP')) ||
+                         (posData.error && String(posData.error).includes('Invalid IP'))
+
+      if (isIpError) {
+        store.setAccountError('IP whitelist error: Add 0.0.0.0/0 to your Bitget API Key IP whitelist, or add the server IP. Go to Bitget > API Management > Edit > IP Whitelist.')
+      } else {
+        store.setAccountError('')
+      }
+
       if (balData.ok && Array.isArray(balData.data)) {
         setAccountBalances(balData.data)
-        // Update balance in store
         const usdtBalance = balData.data.find((b: AccountBalance) => b.coin === 'USDT')
         if (usdtBalance) {
           store.setBalance(parseFloat(usdtBalance.available || usdtBalance.total || '0'))
@@ -425,8 +441,9 @@ export default function TradingAgentApp() {
       if (posData.ok && Array.isArray(posData.data)) {
         setAccountPositions(posData.data)
       }
-    } catch {
-      // silently fail
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error'
+      store.setAccountError(`Connection failed: ${msg}`)
     }
     setAccountLoading(false)
   }, [store.bitgetConfig])
@@ -464,40 +481,45 @@ export default function TradingAgentApp() {
             decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode, store.bitgetConfig.playbookApiKey)
 
             // Enhance with Playbook data
-            if (playbookResult.action) {
-              decision.analysis.action = playbookResult.action
-              decision.analysis.confidence = playbookResult.confidence || decision.analysis.confidence
-              if (playbookResult.reasoning) {
-                decision.analysis.reasoning = [...playbookResult.reasoning, ...decision.analysis.reasoning]
-              }
-              decision.execution.action = playbookResult.action
+            decision.analysis.action = playbookResult.action
+            decision.analysis.confidence = playbookResult.confidence || decision.analysis.confidence
+            if (playbookResult.reasoning) {
+              decision.analysis.reasoning = [...playbookResult.reasoning, ...decision.analysis.reasoning]
             }
+            decision.execution.action = playbookResult.action
+
+            // Build status message
+            const sourceLabel = playbookResult.source === 'playbook_api' ? '✅ Playbook API' : '⚠️ Local NLP (API unavailable)'
+            const warningMsg = playbookResult.warning ? `\n⚠️ ${playbookResult.warning}` : ''
+            const errorMsg = playbookResult.errorDetail ? `\n📋 Detail: ${playbookResult.errorDetail}` : ''
 
             store.addMessage({
               role: 'assistant',
-              content: `${tr.chat.strategyAnalyzed} ${tr.chat.playbookActive}`,
+              content: `${tr.chat.strategyAnalyzed} [${sourceLabel}]${warningMsg}${errorMsg}`,
               decision,
             })
             addToast(tr.chat.strategyAnalyzed, 'success')
           } else {
-            // Fallback to simulation
+            // Playbook returned error
+            const errMsg = playbookResult.error || playbookResult.errorDetail || 'Unknown error'
             decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode)
             store.addMessage({
               role: 'assistant',
-              content: `${tr.chat.playbookFallback}`,
+              content: `${tr.chat.playbookFallback}\n❌ Playbook Error: ${errMsg}`,
               decision,
             })
-            addToast(tr.chat.playbookFallback, 'warning')
+            addToast(`${tr.chat.playbookFallback}: ${errMsg}`, 'warning')
           }
-        } catch {
-          // Fallback to simulation
+        } catch (err) {
+          // Network error calling Playbook
+          const errMsg = err instanceof Error ? err.message : 'Network error'
           decision = await runAgentPipeline(strategy, store.selectedCoin, store.tradingMode)
           store.addMessage({
             role: 'assistant',
-            content: tr.chat.playbookFallback,
+            content: `${tr.chat.playbookFallback}\n❌ Error: ${errMsg}`,
             decision,
           })
-          addToast(tr.chat.playbookFallback, 'warning')
+          addToast(`${tr.chat.playbookFallback}: ${errMsg}`, 'warning')
         }
       } else {
         // No Playbook key, use simulation
@@ -579,7 +601,7 @@ export default function TradingAgentApp() {
   // ============ TEST CONNECTION ============
   const testConnection = useCallback(async () => {
     if (!settingsApi.apiKey || !settingsApi.secretKey || !settingsApi.passphrase) {
-      addToast(tr.settings.connectionFailed, 'error')
+      addToast('Please fill in all API credentials first', 'error')
       return
     }
     try {
@@ -592,10 +614,19 @@ export default function TradingAgentApp() {
       if (data.ok) {
         addToast(tr.settings.connectionSuccess, 'success')
       } else {
-        addToast(`${tr.settings.connectionFailed}: ${data.error}`, 'error')
+        const errMsg = data.error || 'Unknown error'
+        // Check for IP whitelist error specifically
+        if (String(errMsg).includes('Invalid IP')) {
+          addToast('❌ IP Whitelist Error: Go to Bitget > API Management > Edit your API Key > Add "0.0.0.0/0" to IP Whitelist', 'error')
+        } else if (String(errMsg).includes('Invalid')) {
+          addToast(`❌ Authentication Error: ${errMsg}. Check your API Key, Secret, and Passphrase.`, 'error')
+        } else {
+          addToast(`❌ ${tr.settings.connectionFailed}: ${errMsg}`, 'error')
+        }
       }
-    } catch {
-      addToast(tr.settings.connectionFailed, 'error')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error'
+      addToast(`❌ ${tr.settings.connectionFailed}: ${msg}`, 'error')
     }
   }, [settingsApi, tr, addToast])
 
@@ -973,6 +1004,23 @@ export default function TradingAgentApp() {
             Refresh
           </button>
         </div>
+
+        {/* IP Whitelist Error Banner */}
+        {store.accountError && (
+          <div className="mb-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-400 space-y-1">
+            <p className="font-semibold">⚠️ API Connection Error</p>
+            <p>{store.accountError}</p>
+            <p className="text-amber-400/70">💡 Tip: Public market data (prices, K-lines) works without API keys. Only private endpoints (balance, positions, orders) require IP whitelisting.</p>
+          </div>
+        )}
+
+        {/* No API Keys Warning */}
+        {!store.bitgetConfig.apiKey && (
+          <div className="mb-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-xs text-blue-400 space-y-1">
+            <p className="font-semibold">ℹ️ No API Keys Configured</p>
+            <p>Go to Settings to add your Bitget API credentials. Public market data still works without keys.</p>
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-muted/30 rounded-lg p-3">
             <p className="text-xs text-muted-foreground">{tr.dashboard.balance}</p>
@@ -1317,6 +1365,18 @@ export default function TradingAgentApp() {
             <span className={cn('w-1.5 h-1.5 rounded-full', settingsApi.secretKey ? 'bg-emerald-400' : 'bg-muted-foreground')} />
             Secret {settingsApi.secretKey ? tr.settings.configured : tr.settings.notConfigured}
           </span>
+        </div>
+        {/* IP Whitelist Guide */}
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-400 space-y-1">
+          <p className="font-semibold">🔒 IP Whitelist Configuration (Required for Private API)</p>
+          <p>If you see &quot;Invalid IP&quot; errors, you need to add your server IP to the Bitget API Key whitelist:</p>
+          <ol className="list-decimal list-inside space-y-0.5 text-amber-400/80">
+            <li>Log in to Bitget → API Management</li>
+            <li>Find your API Key → Edit</li>
+            <li>Add &quot;0.0.0.0/0&quot; (allow all IPs) or the specific server IP</li>
+            <li>Save and wait 5 minutes for changes to take effect</li>
+          </ol>
+          <p className="text-amber-400/60">Note: Public market data (prices, K-lines) works without API keys or IP whitelisting.</p>
         </div>
       </div>
 

@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const { apiKey, secretKey, passphrase } = await request.json()
 
     if (!apiKey || !secretKey || !passphrase) {
-      return NextResponse.json({ error: 'API credentials required' }, { status: 400 })
+      return NextResponse.json({ error: 'API credentials required (API Key, Secret Key, Passphrase)' }, { status: 400 })
     }
 
     const method = 'GET'
@@ -29,6 +29,7 @@ export async function POST(request: Request) {
         'ACCESS-TIMESTAMP': timestamp,
         'ACCESS-PASSPHRASE': passphrase,
         'Content-Type': 'application/json',
+        'X-CHANNEL-API-CODE': 'bitget_trading_agent',
       },
     })
 
@@ -38,16 +39,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ data: data.data, ok: true })
     }
 
+    // Detect specific error types
+    const errorMsg = data.msg || 'Failed to fetch account balance'
+    const errorCode = data.code || ''
+
+    // IP whitelist error
+    if (String(errorMsg).includes('Invalid IP') || errorCode === '40001') {
+      return NextResponse.json({
+        data: null,
+        ok: false,
+        error: `Invalid IP (${extractIp(errorMsg)}). You need to add this IP or "0.0.0.0/0" to your Bitget API Key IP whitelist. Go to: Bitget > API Management > Edit > IP Whitelist`,
+        errorType: 'IP_WHITELIST',
+      })
+    }
+
+    // Authentication error
+    if (errorCode === '40002' || String(errorMsg).includes('Invalid')) {
+      return NextResponse.json({
+        data: null,
+        ok: false,
+        error: `Authentication failed: ${errorMsg}. Please check your API Key, Secret Key, and Passphrase.`,
+        errorType: 'AUTH',
+      })
+    }
+
     return NextResponse.json({
       data: null,
       ok: false,
-      error: data.msg || 'Failed to fetch account balance',
+      error: errorMsg,
+      errorType: 'API_ERROR',
     })
   } catch (error) {
     return NextResponse.json({
       data: null,
       ok: false,
       error: error instanceof Error ? error.message : 'Network error',
+      errorType: 'NETWORK',
     }, { status: 500 })
   }
+}
+
+function extractIp(msg: string): string {
+  const match = msg.match(/(\d+\.\d+\.\d+\.\d+)/)
+  return match ? match[1] : 'unknown'
 }
