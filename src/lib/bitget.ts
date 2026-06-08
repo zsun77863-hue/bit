@@ -61,24 +61,22 @@ export async function fetchAllTickers(): Promise<Record<string, import('@/types'
     const res = await fetch('/api/bitget/tickers')
     const json = await res.json()
 
-    if (!json.data || !Array.isArray(json.data)) {
-      console.warn('fetchAllTickers: no data array in response')
+    if (!json.data || typeof json.data !== 'object') {
+      console.warn('fetchAllTickers: no data object in response', json)
       return {}
     }
 
+    // Our proxy returns { data: { BTCUSDT: {...}, ETHUSDT: {...}, ... } }
     const result: Record<string, import('@/types').TickerData> = {}
-    for (const item of json.data) {
-      // Bitget V2 ticker fields
-      const symbol = item.symbol || item.instId || ''
-      if (!symbol) continue
-
+    for (const [symbol, t] of Object.entries(json.data)) {
+      const ticker = t as Record<string, string>
       result[symbol] = {
         symbol,
-        lastPrice: parseFloat(item.lastPr || item.last || '0'),
-        high24h: parseFloat(item.high24h || '0'),
-        low24h: parseFloat(item.low24h || '0'),
-        change24h: parseFloat(item.changeUtc24h || item.change24h || '0'),
-        volume24h: parseFloat(item.quoteVolume24h || item.usdtVolume24h || item.baseVolume24h || '0'),
+        lastPrice: parseFloat(ticker.lastPr || '0'),
+        high24h: parseFloat(ticker.high24h || '0'),
+        low24h: parseFloat(ticker.low24h || '0'),
+        change24h: parseFloat(ticker.changeUtc24h || ticker.change24h || '0'),
+        volume24h: parseFloat(ticker.usdtVolume || ticker.quoteVolume || '0'),
       }
     }
     return result
@@ -108,14 +106,15 @@ export async function fetchPriceHistory(
       return []
     }
 
-    // Our proxy already transforms arrays to objects
+    // Our proxy transforms arrays to objects with named fields
+    // Candle fields: ts, open, high, low, close, baseVol, quoteVol, usdtVol
     return json.data.map((c: { ts: string; open: string; high: string; low: string; close: string; quoteVol?: string; baseVol?: string; usdtVol?: string }) => ({
       timestamp: parseInt(c.ts),
       open: parseFloat(c.open),
       high: parseFloat(c.high),
       low: parseFloat(c.low),
       close: parseFloat(c.close),
-      volume: parseFloat(c.quoteVol || c.usdtVol || c.baseVol || '0'),
+      volume: parseFloat(c.usdtVol || c.quoteVol || c.baseVol || '0'),
     }))
   } catch (error) {
     console.error('fetchPriceHistory error:', error)

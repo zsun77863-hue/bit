@@ -6,8 +6,12 @@ import { NextResponse } from 'next/server'
  * Fetches K-line / candlestick data from Bitget Public API.
  * No API key required - this is a public endpoint.
  * 
+ * Bitget API v2 path: /api/v2/spot/market/candles
+ * 
  * Granularity options: 1min, 5min, 15min, 30min, 1h, 4h, 12h, 1day, 1week
  * Max limit: 1000
+ * 
+ * Response format: [[ts, open, high, low, close, baseVol, quoteVol, usdtVol], ...]
  */
 export async function GET(request: Request) {
   try {
@@ -25,12 +29,12 @@ export async function GET(request: Request) {
       )
     }
 
-    const url = `https://api.bitget.com/api/v2/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`
+    const url = `https://api.bitget.com/api/v2/spot/market/candles?symbol=${symbol}&granularity=${granularity}&limit=${limit}`
 
     const res = await fetch(url, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
-      next: { revalidate: 5 },
+      cache: 'no-store',
     })
 
     if (!res.ok) {
@@ -49,7 +53,7 @@ export async function GET(request: Request) {
       )
     }
 
-    // Bitget returns candles as arrays: [ts, open, high, low, close, quoteVol, baseVol, usdtVol]
+    // Bitget returns candles as arrays: [ts, open, high, low, close, baseVol, quoteVol, usdtVol]
     // Transform to objects for easier frontend consumption
     const candles = Array.isArray(json.data) 
       ? json.data.map((c: string[]) => ({
@@ -58,8 +62,8 @@ export async function GET(request: Request) {
           high: c[2],
           low: c[3],
           close: c[4],
-          quoteVol: c[5],
-          baseVol: c[6],
+          baseVol: c[5],
+          quoteVol: c[6],
           usdtVol: c[7],
         }))
       : []

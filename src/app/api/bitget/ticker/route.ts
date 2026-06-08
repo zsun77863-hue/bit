@@ -5,6 +5,8 @@ import { NextResponse } from 'next/server'
  * 
  * Fetches a single ticker from Bitget Public API.
  * No API key required - this is a public endpoint.
+ * 
+ * Bitget API v2 path: /api/v2/spot/market/tickers?symbol=BTCUSDT
  */
 export async function GET(request: Request) {
   try {
@@ -12,11 +14,11 @@ export async function GET(request: Request) {
     const symbol = searchParams.get('symbol') || 'BTCUSDT'
 
     const res = await fetch(
-      `https://api.bitget.com/api/v2/market/tickers?symbol=${symbol}&productType=USDT-FUTURES`,
+      `https://api.bitget.com/api/v2/spot/market/tickers?symbol=${symbol}`,
       {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
-        next: { revalidate: 3 },
+        cache: 'no-store',
       }
     )
 
